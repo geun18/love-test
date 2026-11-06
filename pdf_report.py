@@ -153,6 +153,22 @@ def radar(rows, font="Korean"):
         chart.add(Polygon(polygon([score / 100 for score in scores]),
                           fillColor=colors.Color(0.32, 0.27, 0.80, alpha=0.18),
                           strokeColor=accent, strokeWidth=2))
+    else:
+        available = [i for i, score in enumerate(scores) if score is not None]
+        if len(available) >= 2:
+            pairs = list(zip(available, available[1:]))
+            if len(available) > 2:
+                pairs.append((available[-1], available[0]))
+            elif (available[0] - available[1]) % 6 == 1:
+                pairs = [(available[1], available[0])]
+
+            for start, end in pairs:
+                x1, y1 = point(start, scores[start] / 100)
+                x2, y2 = point(end, scores[end] / 100)
+                line = Line(x1, y1, x2, y2, strokeColor=accent, strokeWidth=2)
+                if (end - start) % 6 != 1:
+                    line.strokeDashArray = [5, 4]
+                chart.add(line)
     for i, row in enumerate(rows):
         score = scores[i]
         x, y = point(i, 1.25)
@@ -389,7 +405,7 @@ def create_pdf(result, rows):
     story.append(radar(rows))
     add_body(RADAR_NOTE)
     if any(row["score"] is None for row in rows):
-        add_body("응답이 3개 미만인 축은 점과 면을 채우지 않았습니다.")
+        add_body("실선은 인접한 점을, 점선은 응답 부족 축을 건너뛴 구간을 연결합니다. 응답이 부족한 축은 점수를 표시하지 않습니다.")
 
     add_section("응답 근거와 주제별 해설")
     add_body("주제별 4문항 중 최소 3개를 답한 경우에만 역채점 후 평균을 0~100으로 환산합니다. "

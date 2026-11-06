@@ -330,7 +330,7 @@ if "result" in st.session_state:
     st.image(radar_svg(rows))
     st.caption(RADAR_NOTE)
     if any(row["score"] is None for row in rows):
-        st.caption("응답이 3개 미만인 축은 점과 면을 채우지 않았습니다.")
+        st.caption("실선은 인접한 점을, 점선은 응답 부족 축을 건너뛴 구간을 연결합니다. 응답이 부족한 축은 점수를 표시하지 않습니다.")
 
     show_result_section("응답 근거와 주제별 해설")
     for row in rows:
