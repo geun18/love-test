@@ -37,15 +37,7 @@ QUESTIONS = [
     "상대에게 기대고 싶어질 때, 그런 마음 자체를 억누르려고 한다.",
 ]
 
-OPTIONS = [
-    "선택하세요",
-    "1 · 전혀 그렇지 않다",
-    "2 · 대체로 그렇지 않다",
-    "3 · 어느 쪽도 아니다",
-    "4 · 대체로 그렇다",
-    "5 · 매우 그렇다",
-    "판단하기 어려움",
-]
+OPTIONS = ["1", "2", "3", "4", "5", "판단하기 어려움"]
 
 REVERSE = {3, 4, 9, 10, 15, 16, 21, 22}
 
@@ -94,12 +86,20 @@ with st.form("relationship_test"):
 
     st.divider()
 
+    st.caption(
+        "1 전혀 그렇지 않다 · 2 대체로 그렇지 않다 · 3 어느 쪽도 아니다 · "
+        "4 대체로 그렇다 · 5 매우 그렇다"
+    )
+    st.caption("떠올릴 경험이 부족하면 ‘판단하기 어려움’을 선택하세요.")
+
     selected = {}
 
     for number, question in enumerate(QUESTIONS, start=1):
-        selected[number] = st.selectbox(
+        selected[number] = st.radio(
             f"{number}. {question}",
             OPTIONS,
+            index=None,
+            horizontal=True,
             key=f"question_{number}"
         )
 
@@ -115,7 +115,7 @@ if submitted:
     missing = [
         number
         for number, answer in selected.items()
-        if answer == "선택하세요"
+        if answer is None
     ]
 
     if missing:
@@ -129,7 +129,7 @@ if submitted:
             if answer == "판단하기 어려움":
                 answers[number] = None
             else:
-                answers[number] = int(answer[0])
+                answers[number] = int(answer)
 
         anxiety = calculate_score(answers, range(1, 25, 2))
         avoidance = calculate_score(answers, range(2, 25, 2))
