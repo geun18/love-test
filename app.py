@@ -1,8 +1,12 @@
+from base64 import b64encode
+from html import escape
+from pathlib import Path
+
 import streamlit as st
-from pdf_report import create_pdf
+from pdf_report import RADAR_NOTE, analyze_topics, create_pdf, radar_svg, reflection
 
 st.set_page_config(
-    page_title="나의 관계 성향 테스트",
+    page_title="Love:ON | 나의 관계 성향 테스트",
     page_icon="💛"
 )
 
@@ -158,26 +162,110 @@ if submitted:
                 "types": type_scores,
             }
 
+@st.cache_data
+def brand_image(filename):
+    path = Path(__file__).resolve().with_name(filename)
+    if path.is_file():
+        return "data:image/png;base64," + b64encode(path.read_bytes()).decode("ascii")
+    return ""
+
+
+def show_result_header(result):
+    logo = brand_image("loveon-logo.png")
+    background = brand_image("loveon-background.png")
+    logo_html = f'<img src="{logo}" alt="" class="loveon-logo">' if logo else ""
+    bg_style = f"background-image: url('{background}');" if background else ""
+    name = escape(result["name"])
+    relationship = escape(result["relationship"])
+    st.markdown(f"""
+<style>
+.loveon-hero {{
+    {bg_style}
+    background-color: #fff4f9;
+    background-size: 100% 100%;
+    border: 1px solid #ebddf7;
+    border-radius: 26px;
+    text-align: center;
+    padding: 2rem 1rem 2.25rem;
+    color: #2f2244;
+    box-shadow: 0 10px 32px #3e1c6512;
+}}
+.loveon-logo {{ width: 88px; height: 88px; object-fit: contain; }}
+.loveon-brand {{
+    color: #592b82;
+    font-size: clamp(2.5rem, 8vw, 4rem);
+    line-height: 1.1;
+    font-weight: 850;
+    letter-spacing: -0.07em;
+    margin-bottom: 0.65rem;
+}}
+.loveon-hero h2 {{
+    color: #2f2244;
+    font-size: 1.35rem;
+    padding: 0;
+    margin: 0.4rem 0 0.75rem;
+    overflow-wrap: anywhere;
+}}
+.loveon-badge {{
+    background: #ffffffd9;
+    border: 1px solid #e9d9f4;
+    color: #553972;
+    display: inline-block;
+    border-radius: 999px;
+    padding: 0.25rem 0.85rem;
+    font-size: 0.85rem;
+}}
+.loveon-cards {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 175px), 1fr));
+    gap: 0.8rem;
+    margin-top: 1rem;
+}}
+.loveon-card {{
+    background: #f6f0ff;
+    color: #3f2864;
+    border: 1px solid #eadcf9;
+    border-radius: 17px;
+    padding: 0.9rem 1rem;
+}}
+.loveon-card:nth-child(2) {{
+    background: #fff0f6;
+    border-color: #f7dce9;
+    color: #6b2d51;
+}}
+.loveon-card strong {{ display: block; font-size: 1.8rem; }}
+.loveon-card small {{ font-size: 0.85rem; }}
+.loveon-bar {{
+    height: 0.62rem;
+    border-radius: 99px;
+    background: #eee8f6;
+    overflow: hidden;
+    margin: 0.35rem 0 0.85rem;
+}}
+.loveon-bar-fill {{
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #da70ad, #8355cd);
+}}
+</style>
+<section class="loveon-hero" aria-label="Love:ON 관계 성향 결과">
+  {logo_html}
+  <div class="loveon-brand">Love:ON</div>
+  <h2>{name}님의 관계 성향 결과</h2>
+  <span class="loveon-badge">떠올린 관계 · {relationship}</span>
+</section>
+<div class="loveon-cards">
+  <div class="loveon-card">관계 불안<strong>{result['anxiety']:.1f} <small>/ 100</small></strong></div>
+  <div class="loveon-card">관계 회피<strong>{result['avoidance']:.1f} <small>/ 100</small></strong></div>
+</div>
+""", unsafe_allow_html=True)
+
+
 if "result" in st.session_state:
     result = st.session_state["result"]
 
     st.divider()
-    st.subheader(f"📊 {result['name']}님의 결과")
-    st.write(f"떠올린 관계: **{result['relationship']}**")
-
-    left, right = st.columns(2)
-
-    with left:
-        st.metric(
-            "관계 불안",
-            f"{result['anxiety']:.1f} / 100"
-        )
-
-    with right:
-        st.metric(
-            "관계 회피",
-            f"{result['avoidance']:.1f} / 100"
-        )
+    show_result_header(result)
 
     st.write(
         "관계 불안은 상대의 마음이나 관계 유지에 대한 걱정, "
@@ -189,7 +277,12 @@ if "result" in st.session_state:
 
     for label, score in result["types"].items():
         st.write(f"**{label}: {score:.1f}%**")
-        st.progress(max(0.0, min(1.0, score / 100)))
+        width = max(0.0, min(100.0, score))
+        st.markdown(
+            f'<div class="loveon-bar" aria-hidden="true">'
+            f'<div class="loveon-bar-fill" style="width:{width:.2f}%"></div></div>',
+            unsafe_allow_html=True,
+        )
 
     st.caption(
         "두 점수는 설문 응답을 0~100으로 환산한 값이며 "
@@ -205,10 +298,31 @@ if "result" in st.session_state:
     
 if "result" in st.session_state:
     st.divider()
+    result = st.session_state["result"]
+    rows = analyze_topics(result, QUESTIONS)
+    st.subheader("여섯 가지 관계 주제")
+    st.image(radar_svg(rows))
+    st.caption(RADAR_NOTE)
+    if any(row["score"] is None for row in rows):
+        st.caption("응답이 3개 미만인 축은 점과 면을 채우지 않았습니다.")
+
+    for row in rows:
+        score = row["score"]
+        label = f"{score:.1f}점" if score is not None else "응답 부족"
+        with st.expander(f"{row['label']} · {label} · 응답 {row['count']}/4"):
+            st.write(row["meaning"])
+            for _, evidence, _ in row["evidence"]:
+                st.text(evidence)
+
+    st.subheader("내 응답을 바탕으로 돌아보기")
+    for title, detail in reflection(rows):
+        st.markdown(f"**{title}**")
+        st.write(detail)
+
     st.subheader("결과지 저장하기")
 
     try:
-        pdf_bytes = create_pdf(st.session_state["result"])
+        pdf_bytes = create_pdf(result, rows)
 
     except FileNotFoundError as error:
         st.error(str(error))
