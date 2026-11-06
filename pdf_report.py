@@ -4,6 +4,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -14,8 +15,8 @@ from reportlab.platypus import (
     PageBreak,
     KeepTogether,
     Spacer,
-    Table,
-    TableStyle,
+    Flowable,
+    HRFlowable,
 )
 from reportlab.graphics.shapes import Drawing, Rect, String, Polygon, Line, Circle
 from reportlab.graphics import renderSVG
@@ -85,6 +86,49 @@ def reflection(rows):
     yield "4주 뒤 점검", "같은 관계에서 비슷한 상황이 생겼을 때 어떤 행동을 시도했고 무엇이 달랐는지 비교해 보세요. 점수의 변화보다 구체적인 행동을 살펴보세요."
 
 
+MBTI_TYPES = tuple(
+    e + s + t + j for e in "IE" for s in "SN" for t in "TF" for j in "JP"
+)
+MBTI_NOTE = "본인이 선택한 유형을 대화 방법을 고르는 참고로 사용했습니다. 실제로 편한 방법을 선택하세요. MBTI는 설문 점수나 유형 비중에 반영되지 않습니다."
+
+
+def mbti_reflection(mbti, rows):
+    if mbti not in MBTI_TYPES:
+        return []
+    valid = [row for row in rows if row["score"] is not None]
+    focus = max(valid, key=lambda row: row["score"], default=None)
+    if focus and focus["score"] >= 62.5:
+        evidence = max(focus["evidence"], key=lambda item: item[2])
+        context = f"‘{focus['label']}’을 먼저 살펴볼 수 있어요. 그중 {evidence[1]} 이 문항과 비슷한 실제 상황 하나를 떠올려 아래 방법을 적용해 보세요."
+    else:
+        context = "특별히 높게 나온 주제가 없다면 최근에 대화가 조금 어려웠던 장면 하나를 골라 아래 방법을 적용해 보세요."
+
+    timing = {
+        "I": "혼자 생각을 정리한 뒤 말하는 게 편하다면, 전하고 싶은 말을 한 줄 적고 대화를 다시 시작할 시간을 알려 주세요.",
+        "E": "말하면서 생각을 정리하는 게 편하다면, 상대에게 잠깐 들어줄 여유가 있는지 먼저 묻고 이야기해 보세요.",
+    }
+    framing = {
+        "S": "구체적인 예가 편하다면, 실제로 있었던 일 한 가지를 시간이나 행동을 넣어 설명해 보세요.",
+        "N": "대화의 큰 그림부터 보는 게 편하다면, 두 사람이 원하는 관계를 먼저 말한 뒤 이번에 있었던 일 하나로 좁혀 보세요.",
+    }
+    response = {
+        "T": "문제와 해결책을 정리하는 게 편하다면, 제안을 하기 전에 상대가 지금 공감을 원하는지 해결책을 원하는지 물어보세요.",
+        "F": "서로의 감정과 중요하게 여기는 점부터 살피는 게 편하다면, 공감을 표현한 뒤 내가 필요한 것도 한 문장으로 말해 보세요.",
+    }
+    plan = {
+        "J": "일정이 정해지면 마음이 편하다면, 다음 대화 시간을 정하고 함께 지킬 작은 약속 하나만 골라보세요.",
+        "P": "여러 선택지를 열어두는 게 편하다면, 가능한 방법 두 가지 중 하나를 며칠간 시험해 보고 다시 이야기할 날짜를 정해 보세요.",
+    }
+
+    return [
+        ("설문 응답과 함께 보기", context),
+        ("대화 시작", timing[mbti[0]]),
+        ("상황 설명", framing[mbti[1]]),
+        ("상대와 의견 나누기", response[mbti[2]]),
+        ("다음 행동 정하기", plan[mbti[3]]),
+    ]
+
+
 def radar(rows, font="Korean"):
     chart = Drawing(490, 290)
     chart.hAlign = "CENTER"
@@ -104,7 +148,7 @@ def radar(rows, font="Korean"):
         chart.add(Line(245, 144, x, y, strokeColor=colors.HexColor("#CBD5E1")))
 
     scores = [row["score"] for row in rows]
-    accent = colors.HexColor("#5145CD")
+    accent = colors.HexColor("#8355CD")
     if all(score is not None for score in scores):
         chart.add(Polygon(polygon([score / 100 for score in scores]),
                           fillColor=colors.Color(0.32, 0.27, 0.80, alpha=0.18),
@@ -126,6 +170,80 @@ def radar(rows, font="Korean"):
 def radar_svg(rows):
     # 브라우저는 자체 한글 글꼴을 사용합니다.
     return "<svg" + renderSVG.drawToString(radar(rows, "Helvetica")).split("<svg", 1)[1]
+
+
+class LoveOnHeader(Flowable):
+    def __init__(self, result):
+        super().__init__()
+        self.result = result
+        self.assets = Path(__file__).resolve().parent
+        style = ParagraphStyle(
+            "LoveOnRecipient", fontName="Korean", fontSize=16, leading=22,
+            alignment=TA_CENTER, wordWrap="CJK", textColor=colors.HexColor("#2F2244"),
+        )
+        self.recipient = Paragraph(
+            escape(f"{result['name']}님의 관계 성향 결과"), style
+        )
+
+    def wrap(self, available_width, available_height):
+        self.width = available_width
+        _, self.recipient_height = self.recipient.wrap(self.width - 40, available_height)
+        self.height = 183 + self.recipient_height
+        return self.width, self.height
+
+    def draw(self):
+        canvas = self.canv
+        w, h = self.width, self.height
+        canvas.saveState()
+        outline = canvas.beginPath()
+        outline.roundRect(0, 0, w, h, 18)
+        canvas.clipPath(outline, stroke=0, fill=0)
+        canvas.setFillColor(colors.HexColor("#FFF4F9"))
+        canvas.rect(0, 0, w, h, fill=1, stroke=0)
+        background = self.assets / "loveon-background.png"
+        if background.is_file():
+            canvas.drawImage(str(background), 0, 0, w, h, mask="auto")
+        logo = self.assets / "loveon-logo.png"
+        if logo.is_file():
+            canvas.drawImage(str(logo), w / 2 - 42, h - 95, 84, 84, mask="auto")
+        canvas.setFillColor(colors.HexColor("#592B82"))
+        canvas.setFont("Korean", 34)
+        canvas.drawCentredString(w / 2, h - 127, "Love:ON")
+        self.recipient.drawOn(canvas, 20, 44)
+        canvas.setFillColor(colors.HexColor("#553972"))
+        canvas.setFont("Korean", 10)
+        subtitle = f"떠올린 관계 · {self.result['relationship']}"
+        if self.result.get("mbti") in MBTI_TYPES:
+            subtitle += f"   |   MBTI · {self.result['mbti']} (본인 입력)"
+        canvas.drawCentredString(w / 2, 24, subtitle)
+        canvas.restoreState()
+
+
+class ScoreCards(Flowable):
+    def __init__(self, result):
+        super().__init__()
+        self.result = result
+        self.height = 64
+
+    def wrap(self, available_width, available_height):
+        self.width = available_width
+        return self.width, self.height
+
+    def draw(self):
+        canvas = self.canv
+        card_width = (self.width - 12) / 2
+        for index, (label, key, fill, ink) in enumerate((
+            ("관계 불안", "anxiety", "#F6F0FF", "#3F2864"),
+            ("관계 회피", "avoidance", "#FFF0F6", "#6B2D51"),
+        )):
+            x = index * (card_width + 12)
+            canvas.setFillColor(colors.HexColor(fill))
+            canvas.roundRect(x, 0, card_width, self.height, 12, fill=1, stroke=0)
+            canvas.setFillColor(colors.HexColor(ink))
+            canvas.setFont("Korean", 11)
+            canvas.drawString(x + 16, 42, label)
+            canvas.setFont("Korean", 20)
+            canvas.drawString(x + 16, 14, f"{self.result[key]:.1f} / 100")
 
 
 def create_pdf(result, rows):
@@ -157,16 +275,6 @@ def create_pdf(result, rows):
         bottomMargin=40,
     )
 
-    title_style = ParagraphStyle(
-        "TitleKR",
-        fontName="Korean",
-        fontSize=20,
-        leading=28,
-        textColor=colors.HexColor("#24324A"),
-        spaceAfter=16,
-        wordWrap="CJK",
-    )
-
     heading_style = ParagraphStyle(
         "HeadingKR",
         fontName="Korean",
@@ -175,6 +283,11 @@ def create_pdf(result, rows):
         spaceBefore=12,
         spaceAfter=6,
         wordWrap="CJK",
+    )
+
+    section_style = ParagraphStyle(
+        "MajorSectionKR", parent=heading_style, fontSize=14,
+        textColor=colors.HexColor("#592B82"), spaceAfter=4, keepWithNext=True,
     )
 
     body_style = ParagraphStyle(
@@ -193,43 +306,21 @@ def create_pdf(result, rows):
             Paragraph(escape(text), heading_style)
         )
 
+    def add_section(text):
+        story.append(Paragraph(escape(text), section_style))
+        rule = HRFlowable(
+            width="100%", thickness=1, color=colors.HexColor("#C9ACDE"),
+            spaceAfter=7,
+        )
+        rule.keepWithNext = True
+        story.append(rule)
+
     def add_body(text):
         story.append(
             Paragraph(escape(text), body_style)
         )
 
-    # 3. 제목과 기본 정보
-    story.append(
-        Paragraph("나의 관계 성향 결과지", title_style)
-    )
-
-    add_body(f"이름 또는 별명: {result['name']}")
-    add_body(f"떠올린 관계: {result['relationship']}")
-
-    # 4. 불안·회피 점수 표
-    add_heading("1. 관계 불안과 회피")
-
-    data = [
-        ["항목", "점수"],
-        ["관계 불안", f"{result['anxiety']:.1f} / 100"],
-        ["관계 회피", f"{result['avoidance']:.1f} / 100"],
-    ]
-
-    table = Table(data, colWidths=[300, 130])
-
-    table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, -1), "Korean"),
-        ("FONTSIZE", (0, 0), (-1, -1), 11),
-        ("BACKGROUND", (0, 0), (-1, 0),
-         colors.HexColor("#EAF0F8")),
-        ("GRID", (0, 0), (-1, -1),
-         0.5, colors.HexColor("#CBD5E1")),
-        ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-    ]))
-
-    story.append(table)
-    story.append(Spacer(1, 10))
+    story.extend([LoveOnHeader(result), Spacer(1, 12), ScoreCards(result), Spacer(1, 10)])
 
     add_body(
         "관계 불안은 상대의 마음이나 관계 유지에 대한 걱정을, "
@@ -238,7 +329,7 @@ def create_pdf(result, rows):
     )
 
     # 5. 네 성향의 가로 막대그래프
-    add_heading("2. 네 성향의 참고용 비중")
+    add_section("네 성향의 참고용 비중")
 
     chart = Drawing(490, 155)
 
@@ -255,13 +346,13 @@ def create_pdf(result, rows):
 
         chart.add(Rect(
             140, y, 280, 14,
-            fillColor=colors.HexColor("#E5E7EB"),
+            fillColor=colors.HexColor("#EEE8F6"),
             strokeColor=None,
         ))
 
         chart.add(Rect(
             140, y, 280 * score / 100, 14,
-            fillColor=colors.HexColor("#6366F1"),
+            fillColor=colors.HexColor("#8355CD"),
             strokeColor=None,
         ))
 
@@ -279,11 +370,11 @@ def create_pdf(result, rows):
         "반올림으로 합계에 작은 차이가 날 수 있습니다."
     )
 
-    add_heading("한눈에 보는 응답")
+    add_section("한눈에 보는 응답")
     for title, detail in list(reflection(rows))[:2]:
         add_body(f"{title}: {detail}")
 
-    add_heading("결과를 읽을 때")
+    add_section("결과를 읽을 때")
 
     add_body(
         "검증 전 자체 제작 자기이해용 설문입니다. "
@@ -294,13 +385,13 @@ def create_pdf(result, rows):
     )
 
     story.append(PageBreak())
-    add_heading("3. 여섯 가지 관계 주제")
+    add_section("여섯 가지 관계 주제")
     story.append(radar(rows))
     add_body(RADAR_NOTE)
     if any(row["score"] is None for row in rows):
         add_body("응답이 3개 미만인 축은 점과 면을 채우지 않았습니다.")
 
-    add_heading("4. 응답 근거와 주제별 해설")
+    add_section("응답 근거와 주제별 해설")
     add_body("주제별 4문항 중 최소 3개를 답한 경우에만 역채점 후 평균을 0~100으로 환산합니다. "
              "각 점수는 집단과 비교한 기준이 아니며, 선택한 관계에만 해당합니다.")
 
@@ -310,26 +401,36 @@ def create_pdf(result, rows):
         label = f"{score:.1f}점" if score is not None else "응답 부족"
         add_heading(f"{row['label']}  |  {label}  |  응답 {row['count']}/4")
         add_body(f"살펴보는 내용: {row['meaning']}.")
-        if score is not None:
-            items = sorted(row["evidence"], key=lambda item: (-item[2], item[0]))
-            high = next((item for item in items if item[2] >= 4), None)
-            low = next((item for item in reversed(items) if item[2] <= 2), None)
-            if high:
-                add_body(f"부담과 연결된 응답: {high[1]}")
-            if low:
-                add_body(f"편안함과 연결된 응답: {low[1]}")
-            if not high and not low:
-                add_body("이 주제에서는 걱정이나 편안함 어느 쪽도 강하게 답하지 않았습니다.")
+        evidence = row["evidence"]
+        high = max(evidence, key=lambda item: item[2], default=None)
+        low = min(evidence, key=lambda item: item[2], default=None)
+        for item in evidence:
+            tag = ""
+            if score is not None:
+                if item == high and item[2] >= 4:
+                    tag = " [부담과 연결된 응답]"
+                elif item == low and item[2] <= 2:
+                    tag = " [편안함과 연결된 응답]"
+            add_body(item[1] + tag)
         story[start:] = [KeepTogether(story[start:])]
 
-    add_heading("5. 강점과 개선을 위한 실행 계획")
+    story.append(PageBreak())
+    add_section("내 응답을 바탕으로 돌아보기")
     for title, detail in reflection(rows):
         story.append(KeepTogether([
             Paragraph(escape(title), heading_style),
             Paragraph(escape(detail), body_style),
         ]))
 
-    doc.title = "나의 관계 성향 결과지"
+    mbti = result.get("mbti")
+    tips = mbti_reflection(mbti, rows)
+    if tips:
+        add_section(f"MBTI 참고 · {mbti}")
+        add_body(MBTI_NOTE)
+        for title, detail in tips:
+            add_body(f"{title}: {detail}")
+
+    doc.title = "Love:ON | 관계 성향 결과지"
 
     # 8. PDF 완성
     def page_number(canvas, doc):

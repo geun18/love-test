@@ -1,9 +1,11 @@
 from base64 import b64encode
 from html import escape
 from pathlib import Path
+import re
 
 import streamlit as st
-from pdf_report import RADAR_NOTE, analyze_topics, create_pdf, radar_svg, reflection
+from pdf_report import (MBTI_NOTE, MBTI_TYPES, RADAR_NOTE, analyze_topics,
+                        create_pdf, mbti_reflection, radar_svg, reflection)
 
 st.set_page_config(
     page_title="Love:ON | 나의 관계 성향 테스트",
@@ -77,7 +79,13 @@ st.caption(
 )
 
 with st.form("relationship_test"):
-    name = st.text_input("이름 또는 별명 — 선택")
+    name = st.text_input("이름 또는 별명 — 선택", max_chars=60)
+
+    mbti = st.selectbox(
+        "MBTI — 선택",
+        ["입력하지 않음", "잘 모르겠어요", *MBTI_TYPES],
+        help="알고 있는 유형을 선택하면 결과지의 대화 제안에 참고합니다. 점수에는 반영하지 않습니다.",
+    )
 
     relationship = st.selectbox(
         "어떤 관계를 떠올리며 답할까요?",
@@ -156,6 +164,7 @@ if submitted:
             st.session_state["result"] = {
                 "name": name.strip() or "참여자",
                 "relationship": relationship,
+                "mbti": mbti if mbti in MBTI_TYPES else None,
                 "answers": answers,
                 "anxiety": anxiety,
                 "avoidance": avoidance,
@@ -177,6 +186,11 @@ def show_result_header(result):
     bg_style = f"background-image: url('{background}');" if background else ""
     name = escape(result["name"])
     relationship = escape(result["relationship"])
+    mbti = result.get("mbti")
+    mbti_badge = (
+        f'<span class="loveon-badge">MBTI · {escape(mbti)} (본인 입력)</span>'
+        if mbti in MBTI_TYPES else ""
+    )
     st.markdown(f"""
 <style>
 .loveon-hero {{
@@ -235,6 +249,11 @@ def show_result_header(result):
 }}
 .loveon-card strong {{ display: block; font-size: 1.8rem; }}
 .loveon-card small {{ font-size: 0.85rem; }}
+.loveon-section {{
+    border-bottom: 2px solid #c9acde;
+    margin: 0.95rem 0 0.4rem;
+    padding: 0 0 0.55rem !important;
+}}
 .loveon-bar {{
     height: 0.62rem;
     border-radius: 99px;
@@ -253,12 +272,20 @@ def show_result_header(result):
   <div class="loveon-brand">Love:ON</div>
   <h2>{name}님의 관계 성향 결과</h2>
   <span class="loveon-badge">떠올린 관계 · {relationship}</span>
+  {mbti_badge}
 </section>
 <div class="loveon-cards">
   <div class="loveon-card">관계 불안<strong>{result['anxiety']:.1f} <small>/ 100</small></strong></div>
   <div class="loveon-card">관계 회피<strong>{result['avoidance']:.1f} <small>/ 100</small></strong></div>
 </div>
 """, unsafe_allow_html=True)
+
+
+def show_result_section(title):
+    st.markdown(
+        f'<h3 class="loveon-section">{escape(title)}</h3>',
+        unsafe_allow_html=True,
+    )
 
 
 if "result" in st.session_state:
@@ -273,7 +300,7 @@ if "result" in st.session_state:
         "불편을 묻는 응답에서 계산했습니다."
     )
 
-    st.subheader("네 성향의 참고용 비중")
+    show_result_section("네 성향의 참고용 비중")
 
     for label, score in result["types"].items():
         st.write(f"**{label}: {score:.1f}%**")
@@ -297,15 +324,15 @@ if "result" in st.session_state:
     )
     
 if "result" in st.session_state:
-    st.divider()
     result = st.session_state["result"]
     rows = analyze_topics(result, QUESTIONS)
-    st.subheader("여섯 가지 관계 주제")
+    show_result_section("여섯 가지 관계 주제")
     st.image(radar_svg(rows))
     st.caption(RADAR_NOTE)
     if any(row["score"] is None for row in rows):
         st.caption("응답이 3개 미만인 축은 점과 면을 채우지 않았습니다.")
 
+    show_result_section("응답 근거와 주제별 해설")
     for row in rows:
         score = row["score"]
         label = f"{score:.1f}점" if score is not None else "응답 부족"
@@ -314,12 +341,21 @@ if "result" in st.session_state:
             for _, evidence, _ in row["evidence"]:
                 st.text(evidence)
 
-    st.subheader("내 응답을 바탕으로 돌아보기")
+    show_result_section("내 응답을 바탕으로 돌아보기")
     for title, detail in reflection(rows):
         st.markdown(f"**{title}**")
         st.write(detail)
 
-    st.subheader("결과지 저장하기")
+    mbti = result.get("mbti")
+    tips = mbti_reflection(mbti, rows)
+    if tips:
+        show_result_section(f"MBTI 참고 · {mbti}")
+        st.caption(MBTI_NOTE)
+        for title, detail in tips:
+            st.markdown(f"**{title}**")
+            st.write(detail)
+
+    show_result_section("결과지 저장하기")
 
     try:
         pdf_bytes = create_pdf(result, rows)
@@ -328,10 +364,12 @@ if "result" in st.session_state:
         st.error(str(error))
 
     else:
+        recipient = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", result["name"]).strip(" .")
+        recipient = recipient or "참여자"
         st.download_button(
             label="📄 결과지 PDF 다운로드",
             data=pdf_bytes,
-            file_name="관계성향_결과지.pdf",
+            file_name=f"{recipient}_관계성향 결과지.pdf",
             mime="application/pdf",
             use_container_width=True,
         )
